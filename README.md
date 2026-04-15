@@ -19,15 +19,15 @@ curl -fsSL https://raw.githubusercontent.com/deepakpathik/openclaw-guide/main/in
 
 ## 🏗 What the Installer Does
 
-| Step | Action |
-|------|--------|
-| 1 | Updates system packages |
-| 2 | Installs Node.js 20 LTS |
-| 3 | Installs & configures Tailscale VPN |
-| 4 | Configures UFW firewall (blocks all except Tailscale) |
-| 5 | Clones & installs OpenClaw |
-| 6 | Creates `.env` config file |
-| 7 | Registers systemd service (auto-start on reboot) |
+| Step | Action | Tool / Technology |
+|------|--------|-------------------|
+| 1 | System update & prerequisites | `apt-get` |
+| 2 | Node.js 20 LTS installation | NodeSource repo |
+| 3 | Tailscale VPN installation & auth | Tailscale official installer |
+| 4 | UFW firewall hardening | `ufw` (allow only `tailscale0`) |
+| 5 | OpenClaw clone & `npm install` | `git` + `npm` |
+| 6 | `.env` config file generation | bash heredoc |
+| 7 | systemd service registration | `systemctl enable` + `start` |
 
 ### Installation Flow
 
@@ -100,10 +100,21 @@ flowchart LR
    - OS: Ubuntu 22.04 (ARM)
 4. Open port 22 in the OCI Network Security List (temporarily, for initial SSH)
 
+### Free Tier Resources
+
+| Resource | Specification | Cost |
+|---|---|---|
+| Compute Shape | VM.Standard.A1.Flex (ARM Ampere) | **FREE** |
+| OCPUs | 4 vCPUs | **FREE** |
+| RAM | 24 GB | **FREE** |
+| Storage | 200 GB Block Volume | **FREE** |
+| OS | Ubuntu 22.04 LTS (ARM64) | **FREE** |
+| Networking | 10 TB/month outbound | **FREE** |
+
 ## 📁 Repository Structure
 
 ```
-openclaw-oracle/
+openclaw-guide/
 ├── install.sh          ← One-click installer (main entry point)
 ├── README.md
 ├── scripts/
@@ -133,21 +144,34 @@ Restart after changes:
 sudo systemctl restart openclaw
 ```
 
-## 🔒 Security Notes
+## 🔒 Security
 
-- All traffic is blocked at the firewall except through Tailscale
-- SSH is only accessible from your Tailscale IP (100.64.0.0/10)
-- `.env` file permissions are set to `600` (owner-read only)
+The system uses **defense in depth** — multiple layers to keep things safe:
+
+| Security Layer | Implementation | Protects Against |
+|---|---|---|
+| OCI Security List | Block all ingress; allow only SSH for initial setup | Internet port scans |
+| UFW Firewall | Default deny; allow `tailscale0` interface only | Direct VM IP attacks |
+| Tailscale VPN | WireGuard-based encrypted tunnel; MFA supported | Unauthorized access |
+| `.env` Permissions | `chmod 600` applied to `.env` file | File-level API key exposure |
+| systemd Hardening | Runs as non-root `ubuntu` user | Privilege escalation |
+
+## ⚡ Performance Tips
+
+- **Cloud AI (Claude / OpenAI):** Best performance — offloads computation to external APIs
+- **Local AI (Ollama):** Fully private but slower — runs the LLM on the same VM
+- Monitor response times if running everything on one machine
 
 ## 💰 Cost Summary
 
-| Component | Cost |
-|-----------|------|
-| Oracle Cloud ARM VM (4 OCPU / 24GB) | **Free** |
-| Tailscale (up to 3 users) | **Free** |
-| OpenClaw software | **Free** |
-| Anthropic / OpenAI API calls | **Paid per use** |
-| Ollama (local LLMs on same VM) | **Free** |
+| Component | Monthly Cost | Notes |
+|---|---|---|
+| Oracle Cloud ARM VM | ₹0 | Always Free — 4 OCPU / 24GB |
+| Tailscale VPN | ₹0 | Free for personal use |
+| OpenClaw Software | ₹0 | Open source |
+| Anthropic Claude API | Variable | ~₹0.80 per 1K input tokens |
+| Ollama (local LLMs) | ₹0 | Runs free on same VM |
+| **TOTAL (no API usage)** | **₹0 / month** | **Fully free stack possible** |
 
 ## 🛠 Useful Commands
 
@@ -163,4 +187,7 @@ sudo systemctl restart openclaw
 
 # Update OpenClaw
 bash /opt/openclaw/scripts/update.sh
+
+# Uninstall
+sudo bash /opt/openclaw/scripts/uninstall.sh
 ```
