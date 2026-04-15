@@ -7,14 +7,14 @@ One-click deployment of OpenClaw AI Agent on Oracle Cloud Always Free ARM instan
 SSH into your Oracle Cloud VM, then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<your-org>/openclaw-oracle/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/deepakpathik/openclaw-guide/main/install.sh | sudo bash
 ```
 
 Or with a Tailscale auth key (fully unattended):
 
 ```bash
 export TAILSCALE_AUTHKEY="tskey-auth-xxxxx"
-curl -fsSL https://raw.githubusercontent.com/<your-org>/openclaw-oracle/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/deepakpathik/openclaw-guide/main/install.sh | sudo bash
 ```
 
 ## 🏗 What the Installer Does
@@ -28,6 +28,67 @@ curl -fsSL https://raw.githubusercontent.com/<your-org>/openclaw-oracle/main/ins
 | 5 | Clones & installs OpenClaw |
 | 6 | Creates `.env` config file |
 | 7 | Registers systemd service (auto-start on reboot) |
+
+### Installation Flow
+
+```mermaid
+flowchart TD
+    A["curl install.sh | sudo bash"] --> B["System Update\n(apt upgrade + deps)"]
+    B --> C["Install Node.js 20 LTS"]
+    C --> D{"Tailscale\ninstalled?"}
+    D -- No --> E["Install Tailscale"]
+    D -- Yes --> F{"Auth key\nprovided?"}
+    E --> F
+    F -- Yes --> G["Auto-connect to tailnet"]
+    F -- No --> H["Manual: tailscale up"]
+    G --> I["Configure UFW Firewall\n(deny all except Tailscale)"]
+    H --> I
+    I --> J{"OpenClaw repo\ncloneable?"}
+    J -- Yes --> K["git clone + npm install"]
+    J -- No --> L["Create placeholder app"]
+    K --> M["Generate .env config\n(chmod 600)"]
+    L --> M
+    M --> N["Register systemd service"]
+    N --> O["✅ OpenClaw Running!\nhttp://tailscale-ip:3000"]
+
+    style A fill:#0ea5e9,color:#fff,stroke:none
+    style O fill:#22c55e,color:#fff,stroke:none
+    style D fill:#f59e0b,color:#fff,stroke:none
+    style F fill:#f59e0b,color:#fff,stroke:none
+    style J fill:#f59e0b,color:#fff,stroke:none
+```
+
+### Network Architecture
+
+```mermaid
+flowchart LR
+    subgraph Internet
+        OCI["☁️ Oracle Cloud\nAmpere A1 VM\n4 OCPU / 24 GB"]
+    end
+
+    subgraph Tailnet["🔒 Tailscale Mesh (WireGuard)"]
+        direction LR
+        OCI -- "Encrypted tunnel" --> TS(("Tailscale\nRelay"))
+        TS -- "Encrypted tunnel" --> DEV["💻 Your Device"]
+    end
+
+    subgraph VM["Oracle VM Internals"]
+        direction TB
+        UFW["🧱 UFW Firewall\nDeny all except tailscale0"] --> CLAW["🤖 OpenClaw\n(Node.js on :3000)"]
+        CLAW --> AI{"AI Backend"}
+        AI --> CL["Claude API"]
+        AI --> OA["OpenAI API"]
+        AI --> OL["Ollama (local)"]
+    end
+
+    DEV -- "http://100.x.x.x:3000" --> UFW
+
+    style OCI fill:#f97316,color:#fff,stroke:none
+    style DEV fill:#8b5cf6,color:#fff,stroke:none
+    style CLAW fill:#0ea5e9,color:#fff,stroke:none
+    style UFW fill:#ef4444,color:#fff,stroke:none
+    style AI fill:#f59e0b,color:#fff,stroke:none
+```
 
 ## ☁️ Oracle Cloud Setup (Pre-requisites)
 
