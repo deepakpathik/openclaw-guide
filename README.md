@@ -1,4 +1,4 @@
-# openclaw-desktop
+# openclaw-guide
 
 One-click installer script for [OpenClaw AI](https://openclaw.ai) on **macOS**, **Ubuntu/Debian**, and **Fedora/RHEL**.
 
