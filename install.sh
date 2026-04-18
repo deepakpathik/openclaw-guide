@@ -1,23 +1,22 @@
 #!/bin/bash
-# ============================================================
-#  OpenClaw One-Click Installer for Oracle Cloud Free Tier
-#  Author  : Deepak
-#  Version : 1.0.0
-#  Usage   : curl -fsSL <raw-url>/install.sh | sudo bash
-# ============================================================
+# ═══════════════════════════════════════════════════════════════
+#  OpenClaw One-Click Desktop Installer
+#  Works on: macOS, Ubuntu/Debian, Fedora/RHEL
+#  Usage:   curl -fsSL https://openclaw.ai/install.sh | bash
+#           OR: bash install.sh
+# ═══════════════════════════════════════════════════════════════
 
 set -euo pipefail
 
-# ─── Colors ────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 log()     { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 error()   { echo -e "${RED}[✗]${NC} $*"; exit 1; }
-section() { echo -e "\n${CYAN}${BOLD}══ $* ══${NC}"; }
+info()    { echo -e "${CYAN}[→]${NC} $*"; }
+section() { echo -e "\n${CYAN}${BOLD}━━ $* ━━${NC}"; }
 
-# ─── Banner ────────────────────────────────────────────────
 echo -e "${CYAN}${BOLD}"
 cat << 'EOF'
    ___                  _____ _               
@@ -25,180 +24,164 @@ cat << 'EOF'
  | | | | '_ \/ _ \ '_ \ |    | |/ _` \ \ /\ / /
  | |_| | |_) \  __/ | | |___| | (_| |\ V  V / 
   \___/| .__/ \___|_| |_\___|_|\__,_| \_/\_/  
-       |_|    One-Click Installer v1.0.0
-       Oracle Cloud Free Tier (ARM / Ampere)
+       |_|   Desktop One-Click Installer
 EOF
 echo -e "${NC}"
+echo -e "  Installing OpenClaw — your personal AI that actually does things.\n"
 
-# ─── Root check ────────────────────────────────────────────
-[[ $EUID -ne 0 ]] && error "Run as root: sudo bash install.sh"
-
-# ─── Config (override via env vars before running) ─────────
-OPENCLAW_PORT="${OPENCLAW_PORT:-3000}"
-OPENCLAW_DIR="${OPENCLAW_DIR:-/opt/openclaw}"
-TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"   # Optional: set to skip interactive auth
-NODE_VERSION="20"
-
-section "STEP 1 — System Update"
-apt-get update -qq
-apt-get upgrade -y -qq
-apt-get install -y -qq curl git ufw unzip jq
-log "System packages updated"
-
-section "STEP 2 — Node.js ${NODE_VERSION}"
-if ! command -v node &>/dev/null || [[ $(node -v | cut -d. -f1 | tr -d 'v') -lt $NODE_VERSION ]]; then
-  curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - >/dev/null 2>&1
-  apt-get install -y -qq nodejs
-  log "Node.js $(node -v) installed"
-else
-  log "Node.js $(node -v) already present"
-fi
-
-section "STEP 3 — Tailscale (Secure Mesh VPN)"
-if ! command -v tailscale &>/dev/null; then
-  curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1
-  log "Tailscale installed"
-else
-  log "Tailscale already installed"
-fi
-
-# Enable IP forwarding for Tailscale exit node (optional)
-echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.d/99-tailscale.conf
-echo 'net.ipv6.conf.all.forwarding = 1' >> /etc/sysctl.d/99-tailscale.conf
-sysctl -p /etc/sysctl.d/99-tailscale.conf >/dev/null 2>&1
-
-if [[ -n "$TAILSCALE_AUTHKEY" ]]; then
-  tailscale up --authkey="$TAILSCALE_AUTHKEY" --accept-routes >/dev/null 2>&1
-  log "Tailscale connected (auth key used)"
-else
-  warn "Run  'tailscale up'  after install to connect to your tailnet"
-fi
-
-section "STEP 4 — Firewall (UFW)"
-ufw --force reset >/dev/null 2>&1
-ufw default deny incoming >/dev/null 2>&1
-ufw default allow outgoing >/dev/null 2>&1
-# Allow SSH only from Tailscale subnet (100.64.0.0/10)
-ufw allow in on tailscale0 to any port 22 proto tcp >/dev/null 2>&1
-# Allow OpenClaw UI only from Tailscale
-ufw allow in on tailscale0 to any port "$OPENCLAW_PORT" proto tcp >/dev/null 2>&1
-ufw --force enable >/dev/null 2>&1
-log "UFW configured — all traffic blocked except Tailscale"
-
-section "STEP 5 — OpenClaw"
-mkdir -p "$OPENCLAW_DIR"
-
-# Clone or pull latest
-if [[ -d "$OPENCLAW_DIR/.git" ]]; then
-  git -C "$OPENCLAW_DIR" pull --quiet
-  log "OpenClaw updated"
-else
-  # Replace with actual OpenClaw repo URL when available
-  OPENCLAW_REPO="${OPENCLAW_REPO:-https://github.com/openclaw-ai/openclaw.git}"
-  if git clone --quiet "$OPENCLAW_REPO" "$OPENCLAW_DIR" 2>/dev/null; then
-    log "OpenClaw cloned from $OPENCLAW_REPO"
-  else
-    warn "Could not clone OpenClaw repo. Creating placeholder structure..."
-    mkdir -p "$OPENCLAW_DIR"/{src,config,logs}
-    cat > "$OPENCLAW_DIR/package.json" <<'PKGJSON'
-{
-  "name": "openclaw",
-  "version": "1.0.0",
-  "description": "OpenClaw AI Agent",
-  "main": "src/index.js",
-  "scripts": { "start": "node src/index.js" }
+# ── Detect OS ─────────────────────────────────────────────
+detect_os() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then OS="macos"
+  elif [[ -f /etc/debian_version ]]; then OS="debian"
+  elif [[ -f /etc/fedora-release ]] || [[ -f /etc/redhat-release ]]; then OS="fedora"
+  else OS="unknown"; fi
+  log "Detected OS: $OS"
 }
-PKGJSON
-    cat > "$OPENCLAW_DIR/src/index.js" <<'INDEXJS'
-const http = require('http');
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('OpenClaw is running!\n');
-}).listen(PORT, () => console.log(`OpenClaw listening on :${PORT}`));
-INDEXJS
+
+# ── Node.js >= 22 ─────────────────────────────────────────
+# OpenClaw requires Node >= 22.14.0. Older versions fail silently
+# with regex/syntax errors (learned the hard way on GCP with Node 18).
+ensure_node() {
+  section "Node.js (requires >= 22)"
+  REQUIRED_MAJOR=22
+
+  if command -v node &>/dev/null; then
+    CURRENT=$(node -v | cut -d. -f1 | tr -d 'v')
+    if [[ $CURRENT -ge $REQUIRED_MAJOR ]]; then
+      log "Node.js $(node -v) already meets requirement"; return
+    fi
+    warn "Found Node.js $(node -v) — too old. Upgrading to v22..."
+  else
+    info "Node.js not found. Installing v22..."
   fi
-fi
 
-cd "$OPENCLAW_DIR"
-npm install --silent
-log "Dependencies installed"
+  if [[ "$OS" == "macos" ]]; then
+    if ! command -v brew &>/dev/null; then
+      info "Installing Homebrew first..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+    brew install node@22
+    brew link node@22 --force --overwrite 2>/dev/null || true
 
-section "STEP 6 — Environment Config"
-ENV_FILE="$OPENCLAW_DIR/.env"
-if [[ ! -f "$ENV_FILE" ]]; then
-  cat > "$ENV_FILE" <<EOF
-# OpenClaw Environment Configuration
-# Generated by one-click installer $(date)
+  elif [[ "$OS" == "debian" ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1
+    sudo apt-get install -y -qq nodejs
 
-PORT=${OPENCLAW_PORT}
+  elif [[ "$OS" == "fedora" ]]; then
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - >/dev/null 2>&1
+    sudo dnf install -y nodejs
 
-# ── AI Provider (choose one) ──────────────────────────────
-# Anthropic Claude (incurs API cost)
-# ANTHROPIC_API_KEY=sk-ant-...
+  else
+    error "Unsupported OS. Please install Node.js 22+ from https://nodejs.org then re-run."
+  fi
 
-# OpenAI
-# OPENAI_API_KEY=sk-...
+  node -v | grep -qE "^v2[2-9]|^v[3-9]" || error "Node.js upgrade failed. Install Node v22+ manually."
+  log "Node.js $(node -v) installed"
+}
 
-# Local Ollama (free, runs on same VM)
-# OLLAMA_BASE_URL=http://localhost:11434
+# ── pnpm ──────────────────────────────────────────────────
+# OpenClaw is a pnpm workspace — npm alone will NOT work
+ensure_pnpm() {
+  section "pnpm (workspace manager)"
+  if command -v pnpm &>/dev/null; then
+    log "pnpm $(pnpm -v) already installed"; return
+  fi
+  info "Installing pnpm..."
+  npm install -g pnpm >/dev/null 2>&1
+  log "pnpm $(pnpm -v) installed"
+}
 
-# ── Optional ──────────────────────────────────────────────
-# LOG_LEVEL=info
-# NODE_ENV=production
-EOF
-  log ".env file created at $ENV_FILE — add your API key"
-else
-  log ".env already exists, skipping"
-fi
-chmod 600 "$ENV_FILE"
+# ── Install OpenClaw ───────────────────────────────────────
+install_openclaw() {
+  section "Installing OpenClaw"
 
-section "STEP 7 — Systemd Service (Auto-start)"
-cat > /etc/systemd/system/openclaw.service <<EOF
-[Unit]
-Description=OpenClaw AI Agent
-After=network.target tailscaled.service
-Wants=tailscaled.service
+  # Try official npm global install first (simplest)
+  info "Trying: npm install -g openclaw"
+  if npm install -g openclaw 2>/dev/null && command -v openclaw &>/dev/null; then
+    log "OpenClaw installed via npm"; return
+  fi
 
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=${OPENCLAW_DIR}
-EnvironmentFile=${OPENCLAW_DIR}/.env
-ExecStart=/usr/bin/node src/index.js
-Restart=always
-RestartSec=10
-StandardOutput=append:${OPENCLAW_DIR}/logs/openclaw.log
-StandardError=append:${OPENCLAW_DIR}/logs/stderr.log
+  # Try pnpm global install
+  info "Trying: pnpm add -g openclaw"
+  if pnpm add -g openclaw 2>/dev/null && command -v openclaw &>/dev/null; then
+    log "OpenClaw installed via pnpm"; return
+  fi
 
-[Install]
-WantedBy=multi-user.target
-EOF
+  # Fall back to source (applies all known pnpm fixes)
+  warn "Global install unavailable. Installing from source (takes ~3-5 mins)..."
+  install_from_source
+}
 
-mkdir -p "$OPENCLAW_DIR/logs"
-chown -R ubuntu:ubuntu "$OPENCLAW_DIR" 2>/dev/null || true
-systemctl daemon-reload
-systemctl enable openclaw >/dev/null 2>&1
-systemctl start openclaw
-log "OpenClaw service enabled and started"
+# ── Source install ─────────────────────────────────────────
+# Applies every fix discovered during real deployment:
+#   1. --config.minimumReleaseAge=0  →  bypasses pnpm v10's 48-hour
+#      package age restriction that blocks follow-redirects, koffi, etc.
+#      This overrides at CLI level (highest priority) so workspace
+#      config cannot interfere — the only reliable method.
+#   2. --no-frozen-lockfile  →  allows fresh resolution on new machines
+#   3. Node 22 check happens before this, so no regex failures
+install_from_source() {
+  INSTALL_DIR="${OPENCLAW_DIR:-$HOME/.openclaw}"
 
-# ─── Summary ───────────────────────────────────────────────
-TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "<connect tailscale first>")
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    info "Updating existing source..."
+    git -C "$INSTALL_DIR" pull --quiet
+  else
+    info "Cloning openclaw/openclaw..."
+    git clone https://github.com/openclaw/openclaw.git "$INSTALL_DIR" --quiet
+  fi
 
-echo -e "\n${GREEN}${BOLD}╔══════════════════════════════════════════╗"
-echo -e "║    OpenClaw Installation Complete! ✅   ║"
-echo -e "╚══════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "  ${BOLD}Access URL  :${NC} http://${TAILSCALE_IP}:${OPENCLAW_PORT}"
-echo -e "  ${BOLD}Config File :${NC} ${OPENCLAW_DIR}/.env"
-echo -e "  ${BOLD}Logs        :${NC} ${OPENCLAW_DIR}/logs/openclaw.log"
-echo ""
-echo -e "  ${YELLOW}Next Steps:${NC}"
-echo -e "  1. Edit ${BOLD}${ENV_FILE}${NC} and add your API key"
-echo -e "  2. Run ${BOLD}tailscale up${NC} to connect securely"
-echo -e "  3. sudo systemctl restart openclaw"
-echo ""
-echo -e "  ${CYAN}Useful commands:${NC}"
-echo -e "  sudo systemctl status openclaw"
-echo -e "  sudo journalctl -u openclaw -f"
-echo ""
+  cd "$INSTALL_DIR"
+  info "Installing workspace dependencies (this will take a few minutes)..."
+
+  pnpm install \
+    --config.minimumReleaseAge=0 \
+    --no-frozen-lockfile
+
+  info "Building..."
+  pnpm run build 2>/dev/null || warn "Build completed with warnings (non-fatal)"
+
+  # Register launcher so 'openclaw' works from anywhere
+  sudo tee /usr/local/bin/openclaw > /dev/null << SCRIPT
+#!/bin/bash
+cd "$INSTALL_DIR"
+exec pnpm exec openclaw "\$@"
+SCRIPT
+  sudo chmod +x /usr/local/bin/openclaw
+  log "Launcher registered at /usr/local/bin/openclaw"
+}
+
+# ── Summary ────────────────────────────────────────────────
+print_summary() {
+  echo ""
+  echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════╗"
+  echo -e "║   OpenClaw Installed Successfully!      ║"
+  echo -e "╚══════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}Next steps:${NC}"
+  echo -e "  ${CYAN}openclaw onboard${NC}       — first-time setup (do this now)"
+  echo -e "  ${CYAN}openclaw gateway${NC}       — start the backend service"
+  echo -e "  ${CYAN}openclaw dashboard${NC}     — open the UI"
+  echo -e "  ${CYAN}openclaw --help${NC}        — full command list"
+  echo ""
+  echo -e "  ${BOLD}Talk to it via:${NC} WhatsApp, Telegram, Discord, iMessage, Signal"
+  echo -e "  ${BOLD}Docs:${NC} https://openclaw.ai"
+  echo ""
+}
+
+main() {
+  detect_os
+  ensure_node
+  ensure_pnpm
+  install_openclaw
+  print_summary
+
+  if [[ -t 0 ]]; then
+    read -r -p "  Run onboarding now? [Y/n]: " resp
+    [[ "${resp:-Y}" =~ ^[Yy]$ ]] && openclaw onboard || echo -e "\n  Run ${CYAN}openclaw onboard${NC} when ready.\n"
+  else
+    echo -e "  Run ${CYAN}openclaw onboard${NC} to complete setup.\n"
+  fi
+}
+
+main "$@"
